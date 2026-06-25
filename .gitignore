@@ -1,0 +1,19 @@
+# Environment variables — never commit API keys
+.env
+
+# Chroma vector database — will be rebuilt on server
+data/chroma_db/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+venv311/
+AI-EXPERTISE/
+
+# OS files
+.DS_Store
+Thumbs.db
