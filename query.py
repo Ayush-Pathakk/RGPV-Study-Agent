@@ -1,18 +1,20 @@
-import chromadb
+import chromadb  # delete this line, no longer used
+from pinecone import Pinecone
 from llama_index.core import VectorStoreIndex, StorageContext
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.vector_stores.chroma import ChromaVectorStore
+from llama_index.vector_stores.pinecone import PineconeVectorStore
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 from sentence_transformers import CrossEncoder
 
 from config import (
-    CHROMA_DIR,
-    COLLECTION_NAME,
+    PINECONE_API_KEY,
+    PINECONE_INDEX_NAME,
     EMBED_MODEL_NAME,
     RETRIEVAL_TOP_K,
     RERANKER_TOP_N,
     RERANKER_MODEL,
+    RERANKER_THRESHOLD,
     GROQ_MODEL_NAME,
     GROQ_API_KEY,
     MAX_NEW_TOKEN,
@@ -32,29 +34,28 @@ _llm = ChatGroq(
     max_tokens=MAX_NEW_TOKEN,
 )
 
+_pc = Pinecone(api_key=PINECONE_API_KEY)
+
+
 def load_index():
-    chroma_client     = chromadb.PersistentClient(path=CHROMA_DIR)
-    chroma_collection = chroma_client.get_or_create_collection(COLLECTION_NAME)
-    vector_store      = ChromaVectorStore(chroma_collection=chroma_collection)
-    storage_context   = StorageContext.from_defaults(vector_store=vector_store)
+    pinecone_index = _pc.Index(PINECONE_INDEX_NAME)
+    vector_store = PineconeVectorStore(pinecone_index=pinecone_index)
     index = VectorStoreIndex.from_vector_store(
         vector_store,
         embed_model=_embed_model,
     )
-    print(f"Index loaded. Collection has {chroma_collection.count()} chunks.")
+    stats = pinecone_index.describe_index_stats()
+    print(f"Index loaded. Pinecone reports {stats.total_vector_count} vectors.")
     return index
 
-def retrieve_and_rerank(index, question: str) -> str:
+def retrieve_and_rerank(index, question: str) -> str | None:
     retriever = index.as_retriever(similarity_top_k=RETRIEVAL_TOP_K)
-    nodes     = retriever.retrieve(question)
-
-    pairs  = [(question, node.get_content()) for node in nodes]
+    nodes = retriever.retrieve(question)
+    pairs = [(question, node.get_content()) for node in nodes]
     scores = _reranker.predict(pairs)
-
     ranked = sorted(zip(scores, nodes), key=lambda x: x[0], reverse=True)
-    top    = [node for _, node in ranked[:RERANKER_TOP_N]]
+    top = [node for score, node in ranked[:RERANKER_TOP_N] if score > RERANKER_THRESHOLD]
 
-    top = [node for score, node in ranked[:RERANKER_TOP_N] if score > 0.4]
     if not top:
         return None
 
@@ -76,25 +77,32 @@ def ask(index, question: str, memory: str = "") -> str:
             return f"Your last question was: **{memory.split(chr(10))[0].replace('Previous Q: ', '')}**"
         return "I don't have your previous question in memory."
 
-    intent          = detect_intent(question)
+    intent = detect_intent(question)
+    retrieval_query = (
+        memory.split("\n")[0].replace("Previous Q: ", "") if (memory and len(question.split()) <= 3)
+        else f"{memory} {question}".strip() if memory
+        else question
+    )
+    context = retrieve_and_rerank(index, retrieval_query)
+    memory_block = f"\n\n[Previous Exchange]\n{memory}\n" if memory else ""
+    prompt_map = {"short": SHORT_PROMPT, "4mark": FOUR_MARK_PROMPT, "7mark": SEVEN_MARK_PROMPT}
 
-    is_followup = len(question.split()) <= 4 and not any(c.isalpha() and question.lower() not in ["shorter","longer","brief","detail","4mark","7mark"] for c in question)
-    retrieval_query = memory.split("\n")[0].replace("Previous Q: ", "") if (memory and len(question.split()) <= 3) else f"{memory} {question}".strip() if memory else question
-
-    context         = retrieve_and_rerank(index, retrieval_query)
-    memory_block    = f"\n\n[Previous Exchange]\n{memory}\n" if memory else ""
-
-    prompt_map = {
-        "short": SHORT_PROMPT,
-        "4mark": FOUR_MARK_PROMPT,
-        "7mark": SEVEN_MARK_PROMPT,
-    }
+    if context is None:
+        note = "\n\nNote: nothing relevant was found in your notes for this — answering from general knowledge instead. Verify against your syllabus."
+        messages = [
+            SystemMessage(content=prompt_map[intent].replace(
+                'If context is insufficient, reply: "This topic is not covered in your notes."',
+                "No notes context is available. Answer from general knowledge, following the same structure."
+            )),
+            HumanMessage(content=f"{memory_block}Question: {question}"),
+        ]
+        response = _llm.invoke(messages)
+        return response.content + note
 
     messages = [
         SystemMessage(content=prompt_map[intent]),
         HumanMessage(content=f"{memory_block}<context>\n{context}\n</context>\n\nQuestion: {question}"),
     ]
-
     response = _llm.invoke(messages)
     return response.content
 

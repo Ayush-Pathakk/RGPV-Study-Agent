@@ -1,12 +1,15 @@
 import os
 from dotenv import load_dotenv
 
-# Loads variables from a .env file in the project root into the environment.
 load_dotenv()
 
 PDF_DIR = "data/pdfs"
-CHROMA_DIR = "data/chroma_db"
-COLLECTION_NAME = "rgpv_notes"
+
+# Pinecone
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_INDEX_NAME = "rgpv-data"
+
+MANIFEST_PATH = "data/ingested_files.json"
 
 EMBED_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
@@ -15,9 +18,11 @@ GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
 
 CHUNK_SIZE = 512
 CHUNK_OVERLAP = 128
+
 RETRIEVAL_TOP_K = 10
-RERANKER_TOP_N  = 3
+RERANKER_TOP_N = 3
 RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+RERANKER_THRESHOLD = 0.5
 
 MAX_NEW_TOKEN = 2048
 MIN_NEW_TOKEN = 1
