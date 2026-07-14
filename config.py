@@ -8,7 +8,7 @@ PDF_DIR = "data/pdfs"
 CHROMA_DIR = "data/chroma_db"
 COLLECTION_NAME = "rgpv_notes"
 
-EMBED_MODEL_NAME = "BAAI/bge-large-en-v1.5"
+EMBED_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
