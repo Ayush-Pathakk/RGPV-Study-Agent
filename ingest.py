@@ -5,6 +5,9 @@ from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, StorageCon
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.pinecone import PineconeVectorStore
+import torch
+
+torch.set_num_threads(os.cpu_count())
 
 from config import (
     PDF_DIR,

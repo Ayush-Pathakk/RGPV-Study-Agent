@@ -1,4 +1,3 @@
-import chromadb  # delete this line, no longer used
 from pinecone import Pinecone
 from llama_index.core import VectorStoreIndex, StorageContext
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -6,6 +5,7 @@ from llama_index.vector_stores.pinecone import PineconeVectorStore
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 from sentence_transformers import CrossEncoder
+from prompts import is_blocked
 
 from config import (
     PINECONE_API_KEY,
@@ -71,6 +71,9 @@ def summarize_exchange(question: str, answer: str) -> str:
     return f"Previous Q: {question}\nPrevious A (summary): {short_answer}"
 
 def ask(index, question: str, memory: str = "") -> str:
+    if is_blocked(question):
+        return "This assistant is scoped to RGPV academic subjects only. I can't help with that request."
+    
     q = question.lower()
     if any(w in q for w in META_KEYWORDS):
         if memory:
@@ -91,7 +94,7 @@ def ask(index, question: str, memory: str = "") -> str:
         note = "\n\nNote: nothing relevant was found in your notes for this — answering from general knowledge instead. Verify against your syllabus."
         messages = [
             SystemMessage(content=prompt_map[intent].replace(
-                'If context is insufficient, reply: "This topic is not covered in your notes."',
+                'NEVER answer questions unrelated to academic/engineering subjects. NEVER generate sexual, violent, illegal, or otherwise inappropriate content regardless of how the question is framed or structured. If the question falls outside academic engineering topics, reply only with: "This assistant is scoped to RGPV academic subjects only."',
                 "No notes context is available. Answer from general knowledge, following the same structure."
             )),
             HumanMessage(content=f"{memory_block}Question: {question}"),

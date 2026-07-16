@@ -65,7 +65,21 @@ function appendMessage(role, text) {
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     if (role === "assistant") {
-        bubble.innerHTML = marked.parse(text);
+        const rawHtml = marked.parse(text);
+        bubble.innerHTML = DOMPurify.sanitize(rawHtml);
+
+        // Long structured answers get a copy button
+        if (text.length > 200) {
+            const copyBtn = document.createElement("button");
+            copyBtn.className = "copy-btn";
+            copyBtn.textContent = "Copy answer";
+            copyBtn.onclick = () => {
+                navigator.clipboard.writeText(text);
+                copyBtn.textContent = "Copied!";
+                setTimeout(() => (copyBtn.textContent = "Copy answer"), 1500);
+            };
+            bubble.appendChild(copyBtn);
+        }
     } else {
         bubble.textContent = text;
     }
