@@ -1,6 +1,5 @@
 import os
 import json
-import chromadb  # remove once fully migrated; harmless if left, but can delete this line
 from pinecone import Pinecone
 from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, StorageContext
 from llama_index.core.node_parser import SentenceSplitter

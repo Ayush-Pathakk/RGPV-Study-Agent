@@ -9,3 +9,5 @@ flask==3.0.3
 sentence-transformers==3.2.1
 llama-index-vector-stores-pinecone==0.2.1
 pinecone-client==5.0.1
+pymupdf==1.24.13
+pdfminer.six==20231228
