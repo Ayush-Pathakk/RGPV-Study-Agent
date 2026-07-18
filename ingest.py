@@ -84,6 +84,8 @@ def build_index(documents, vector_store):
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
     print("Chunking, embedding, upserting to Pinecone...")
+    for i, doc in enumerate(documents[:3]):
+        print(type(doc.text), repr(doc.text[:200]))
     index = VectorStoreIndex.from_documents(
         documents,
         storage_context=storage_context,
