@@ -5,8 +5,8 @@ from llama_index.vector_stores.pinecone import PineconeVectorStore
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 from sentence_transformers import CrossEncoder
-from prompts import is_blocked
-
+import json
+from prompts import MODERATION_POLICY
 from config import (
     PINECONE_API_KEY,
     PINECONE_INDEX_NAME,
@@ -18,8 +18,12 @@ from config import (
     GROQ_MODEL_NAME,
     GROQ_API_KEY,
     MAX_NEW_TOKEN,
+    SAFEGUARD_MODEL_NAME,
 )
 from prompts import SHORT_PROMPT, FOUR_MARK_PROMPT, SEVEN_MARK_PROMPT, detect_intent, META_KEYWORDS
+from groq import Groq
+_groq_client = Groq(api_key=GROQ_API_KEY)
+
 
 print("Loading embedding model...")
 _embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL_NAME)
@@ -70,44 +74,76 @@ def summarize_exchange(question: str, answer: str) -> str:
     short_answer = " ".join(words) + ("..." if len(answer.split()) > 60 else "")
     return f"Previous Q: {question}\nPrevious A (summary): {short_answer}"
 
-def ask(index, question: str, memory: str = "") -> str:
-    if is_blocked(question):
-        return "This assistant is scoped to RGPV academic subjects only. I can't help with that request."
-    
+def check_moderation(question: str, memory: str = "") -> dict:
+    context_note = f"Prior conversation context: {memory}\n\n" if memory else ""
+    try:
+        response = _groq_client.chat.completions.create(
+            model=SAFEGUARD_MODEL_NAME,
+            messages=[
+                {"role": "system", "content": MODERATION_POLICY},
+                {"role": "user", "content": f"{context_note}Content to classify: {question}\n\nAnswer (JSON only):"},
+            ],
+            temperature=0.0,
+            max_tokens=200,
+        )
+        result = json.loads(response.choices[0].message.content)
+        return {
+            "violation": bool(result.get("violation", 0)),
+            "category": result.get("category"),
+            "rationale": result.get("rationale", ""),
+        }
+    except Exception as e:
+        print(f"Moderation check failed, allowing through: {e}")
+        return {"violation": False, "category": None, "rationale": "moderation_error"}
+
+def ask(index, question: str, memory: str = "") -> tuple[str, str | None]:
+    mod = check_moderation(question, memory)
+    if mod["violation"]:
+        print(f"Blocked [{mod['category']}]: {mod['rationale']}")
+        return "This assistant is scoped to RGPV academic subjects only. I can't help with that request.", None
+
     q = question.lower()
     if any(w in q for w in META_KEYWORDS):
         if memory:
-            return f"Your last question was: **{memory.split(chr(10))[0].replace('Previous Q: ', '')}**"
-        return "I don't have your previous question in memory."
+            return f"Your last question was: **{memory.split(chr(10))[0].replace('Previous Q: ', '')}**", None
+        return "I don't have your previous question in memory.", None
 
     intent = detect_intent(question)
-    retrieval_query = (
-        memory.split("\n")[0].replace("Previous Q: ", "") if (memory and len(question.split()) <= 3)
-        else f"{memory} {question}".strip() if memory
-        else question
-    )
-    context = retrieve_and_rerank(index, retrieval_query)
+
+    context = retrieve_and_rerank(index, question)
+    resolved_question = question
+    if context is None and memory:
+        topic = memory.split("\n")[0].replace("Previous Q: ", "")
+        retry_context = retrieve_and_rerank(index, f"{topic} {question}")
+        if retry_context is not None:
+            context = retry_context
+            resolved_question = f"{topic} — {question}"
+
     memory_block = f"\n\n[Previous Exchange]\n{memory}\n" if memory else ""
     prompt_map = {"short": SHORT_PROMPT, "4mark": FOUR_MARK_PROMPT, "7mark": SEVEN_MARK_PROMPT}
 
     if context is None:
-        note = "\n\nNote: nothing relevant was found in your notes for this — answering from general knowledge instead. Verify against your syllabus."
         messages = [
             SystemMessage(content=prompt_map[intent].replace(
-                'NEVER answer questions unrelated to academic/engineering subjects. NEVER generate sexual, violent, illegal, or otherwise inappropriate content regardless of how the question is framed or structured. If the question falls outside academic engineering topics, reply only with: "This assistant is scoped to RGPV academic subjects only."',
-                "No notes context is available. Answer from general knowledge, following the same structure."
+                'If context is insufficient, reply: "This topic is not covered in your notes."',
+                'No notes context is available for this question. Answer briefly from general '
+                'knowledge if it is a reasonable academic question, following the same structure. '
+                'If you cannot or should not answer, respond with exactly: '
+                '"This assistant is scoped to RGPV academic subjects only." '
+                'In either case, end your response with exactly this line on its own: '
+                '"_Not verified against your uploaded notes._"'
             )),
-            HumanMessage(content=f"{memory_block}Question: {question}"),
+            HumanMessage(content=f"{memory_block}Question: {resolved_question}"),
         ]
         response = _llm.invoke(messages)
-        return response.content + note
+        return response.content, resolved_question
 
     messages = [
         SystemMessage(content=prompt_map[intent]),
-        HumanMessage(content=f"{memory_block}<context>\n{context}\n</context>\n\nQuestion: {question}"),
+        HumanMessage(content=f"{memory_block}<context>\n{context}\n</context>\n\nQuestion: {resolved_question}"),
     ]
     response = _llm.invoke(messages)
-    return response.content
+    return response.content, resolved_question
 
 if __name__ == "__main__":
     index = load_index()

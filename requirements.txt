@@ -12,3 +12,4 @@ pinecone-client==5.0.1
 pymupdf==1.24.13
 pdfminer.six==20231228
 pinecone
+groq==0.11.0
