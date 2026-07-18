@@ -41,10 +41,11 @@ function sendQuestion() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question }),
     })
-    .then((res) => res.json())
-    .then((data) => {
+    .then((res) => res.json().then((data) => ({ status: res.status, data })))
+    .then(({ status, data }) => {
         removeTyping(typingId);
         appendMessage("assistant", data.answer || "No answer returned.");
+        if (status === 401) requestApiKey();
         sendBtn.disabled = false;
     })
     .catch(() => {
@@ -115,3 +116,17 @@ function removeTyping(id) {
     const el = document.getElementById(id);
     if (el) el.remove();
 }
+
+function requestApiKey() {
+    const key = prompt("Paste your Groq (gsk_...) or Gemini (AIza...) API key:");
+    if (!key) return;
+    fetch("/set-api-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: key.trim() }),
+    })
+    .then((res) => res.json())
+    .then((data) => { if (!data.valid) { alert(data.message); requestApiKey(); } });
+}
+
+fetch("/has-api-key").then((res) => res.json()).then((data) => { if (!data.has_key) requestApiKey(); });

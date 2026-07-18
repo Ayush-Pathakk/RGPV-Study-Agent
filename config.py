@@ -13,7 +13,6 @@ MANIFEST_PATH = "data/ingested_files.json"
 
 EMBED_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL_NAME = "openai/gpt-oss-120b"
 SAFEGUARD_MODEL_NAME = "openai/gpt-oss-safeguard-20b"
 

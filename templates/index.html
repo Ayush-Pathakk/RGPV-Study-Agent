@@ -25,11 +25,11 @@
                 </svg>
                 Chat
             </a>
-            <a href="#" class="nav-item">
+            <a href="#" class="nav-item" id="apiKeyNavItem">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                    <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.099zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
+                    <path d="M0 8a4 4 0 0 1 7.465-2H14a.5.5 0 0 1 .354.146l1.5 1.5a.5.5 0 0 1 0 .708l-1.5 1.5a.5.5 0 0 1-.708 0L13 9.207l-.646.647a.5.5 0 0 1-.708 0L11 9.207l-.646.647a.5.5 0 0 1-.708 0L9 9.207l-.646.647A.5.5 0 0 1 8 10h-.535A4 4 0 0 1 0 8zm4-3a3 3 0 1 0 2.712 4.285A.5.5 0 0 1 7.163 9h.63l.853-.854a.5.5 0 0 1 .708 0l.646.647.646-.647a.5.5 0 0 1 .708 0l.646.647.646-.647a.5.5 0 0 1 .708 0l.646.647.793-.793-1-1H7.163a.5.5 0 0 1-.451-.285A3 3 0 0 0 4 5z"/>
                 </svg>
-                Search
+                API Key
             </a>
             <a href="#" class="nav-item">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
@@ -86,5 +86,15 @@
     </main>
 
     <script src="/static/app.js"></script>
+    <div class="key-modal-overlay" id="keyModalOverlay">
+    <div class="key-modal">
+        <h2>Add your Groq API key</h2>
+        <p>This app is free to host because you bring your own key. Get one free at <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>.</p>
+        <input type="password" id="apiKeyInput" placeholder="gsk_..." autocomplete="off" />
+        <p class="key-error" id="keyError"></p>
+        <button id="saveKeyBtn">Save & Continue</button>
+        <p class="key-note">Your key stays in your session only — never stored in a database.</p>
+    </div>
+</div>
 </body>
 </html>

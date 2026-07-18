@@ -1,12 +1,14 @@
+import json
 from pinecone import Pinecone
 from llama_index.core import VectorStoreIndex
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.pinecone import PineconeVectorStore
 from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from sentence_transformers import CrossEncoder
-import json
-from prompts import MODERATION_POLICY
+from groq import Groq
+
 from config import (
     PINECONE_API_KEY,
     PINECONE_INDEX_NAME,
@@ -20,10 +22,7 @@ from config import (
     MAX_NEW_TOKEN,
     SAFEGUARD_MODEL_NAME,
 )
-from prompts import SHORT_PROMPT, FOUR_MARK_PROMPT, SEVEN_MARK_PROMPT, detect_intent, META_KEYWORDS
-from groq import Groq
-_groq_client = Groq(api_key=GROQ_API_KEY)
-
+from prompts import SHORT_PROMPT, FOUR_MARK_PROMPT, SEVEN_MARK_PROMPT, detect_intent, META_KEYWORDS, MODERATION_POLICY
 
 print("Loading embedding model...")
 _embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL_NAME)
@@ -31,48 +30,66 @@ _embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL_NAME)
 print("Loading reranker...")
 _reranker = CrossEncoder(RERANKER_MODEL)
 
-print("Loading LLM...")
-_llm = ChatGroq(
-    api_key=GROQ_API_KEY,
-    model_name=GROQ_MODEL_NAME,
-    max_tokens=MAX_NEW_TOKEN,
-)
-
 _pc = Pinecone(api_key=PINECONE_API_KEY)
+_groq_client = Groq(api_key=GROQ_API_KEY)  # server-side key — moderation only, never used for answers
 
 
 def load_index():
     pinecone_index = _pc.Index(PINECONE_INDEX_NAME)
     vector_store = PineconeVectorStore(pinecone_index=pinecone_index)
-    index = VectorStoreIndex.from_vector_store(
-        vector_store,
-        embed_model=_embed_model,
-    )
+    index = VectorStoreIndex.from_vector_store(vector_store, embed_model=_embed_model)
     stats = pinecone_index.describe_index_stats()
     print(f"Index loaded. Pinecone reports {stats.total_vector_count} vectors.")
     return index
 
-def retrieve_and_rerank(index, question: str) -> str | None:
+
+def identify_key_provider(key: str) -> str:
+    if key.startswith("gsk_"):
+        return "groq"
+    if key.startswith("AIza"):
+        return "gemini"
+    return "unsupported"
+
+
+def validate_key(key: str, provider: str) -> tuple[bool, str]:
+    if provider == "unsupported":
+        return False, "That doesn't look like a Groq (gsk_...) or Gemini (AIza...) key."
+    try:
+        if provider == "groq":
+            Groq(api_key=key).models.list()
+        else:
+            ChatGoogleGenerativeAI(model="gemini-2.5-flash", api_key=key).invoke("hi")
+        return True, "Key verified."
+    except Exception:
+        return False, f"{provider.capitalize()} rejected this key — check it's active and has quota."
+
+
+def get_llm(provider: str, api_key: str):
+    if provider == "groq":
+        return ChatGroq(api_key=api_key, model_name=GROQ_MODEL_NAME, max_tokens=MAX_NEW_TOKEN)
+    return ChatGoogleGenerativeAI(model="gemini-2.5-flash", api_key=api_key, max_output_tokens=MAX_NEW_TOKEN)
+
+
+def retrieve_and_rerank(index, question: str):
     retriever = index.as_retriever(similarity_top_k=RETRIEVAL_TOP_K)
     nodes = retriever.retrieve(question)
     pairs = [(question, node.get_content()) for node in nodes]
     scores = _reranker.predict(pairs)
     ranked = sorted(zip(scores, nodes), key=lambda x: x[0], reverse=True)
     top = [node for score, node in ranked[:RERANKER_TOP_N] if score > RERANKER_THRESHOLD]
-
     if not top:
         return None
-
-    context = "\n\n---\n\n".join([
+    return "\n\n---\n\n".join([
         f"[Source: {n.metadata.get('filename','?')} | Page: {n.metadata.get('page_no','?')}]\n{n.get_content()}"
         for n in top
     ])
-    return context
+
 
 def summarize_exchange(question: str, answer: str) -> str:
     words = answer.split()[:60]
     short_answer = " ".join(words) + ("..." if len(answer.split()) > 60 else "")
     return f"Previous Q: {question}\nPrevious A (summary): {short_answer}"
+
 
 def check_moderation(question: str, memory: str = "") -> dict:
     context_note = f"Prior conversation context: {memory}\n\n" if memory else ""
@@ -96,7 +113,8 @@ def check_moderation(question: str, memory: str = "") -> dict:
         print(f"Moderation check failed, allowing through: {e}")
         return {"violation": False, "category": None, "rationale": "moderation_error"}
 
-def ask(index, question: str, memory: str = "") -> tuple[str, str | None]:
+
+def ask(index, question: str, api_key: str, provider: str, memory: str = "") -> tuple[str, str | None]:
     mod = check_moderation(question, memory)
     if mod["violation"]:
         print(f"Blocked [{mod['category']}]: {mod['rationale']}")
@@ -109,7 +127,6 @@ def ask(index, question: str, memory: str = "") -> tuple[str, str | None]:
         return "I don't have your previous question in memory.", None
 
     intent = detect_intent(question)
-
     context = retrieve_and_rerank(index, question)
     resolved_question = question
     if context is None and memory:
@@ -121,6 +138,7 @@ def ask(index, question: str, memory: str = "") -> tuple[str, str | None]:
 
     memory_block = f"\n\n[Previous Exchange]\n{memory}\n" if memory else ""
     prompt_map = {"short": SHORT_PROMPT, "4mark": FOUR_MARK_PROMPT, "7mark": SEVEN_MARK_PROMPT}
+    llm = get_llm(provider, api_key)
 
     if context is None:
         messages = [
@@ -135,17 +153,12 @@ def ask(index, question: str, memory: str = "") -> tuple[str, str | None]:
             )),
             HumanMessage(content=f"{memory_block}Question: {resolved_question}"),
         ]
-        response = _llm.invoke(messages)
+        response = llm.invoke(messages)
         return response.content, resolved_question
 
     messages = [
         SystemMessage(content=prompt_map[intent]),
         HumanMessage(content=f"{memory_block}<context>\n{context}\n</context>\n\nQuestion: {resolved_question}"),
     ]
-    response = _llm.invoke(messages)
+    response = llm.invoke(messages)
     return response.content, resolved_question
-
-if __name__ == "__main__":
-    index = load_index()
-    q = "What is an operating system? explain in detail"
-    print(ask(index, q))
