@@ -3,12 +3,6 @@ META_KEYWORDS = [
     "previous question", "last question", "what i recently", "what was the topic"
 ]
 
-BLOCKED_PATTERNS = [
-    "porn", "nude", "nsfw", "hentai", "sex position", "bdsm", "erotic",
-    "rape", "how to kill", "murder someone", "make a bomb", "self harm",
-    "suicide method", "hack into", "steal someone",
-]
-
 MODERATION_POLICY = """# RGPV Study Agent Content Policy
 
 ## INSTRUCTIONS
@@ -41,10 +35,6 @@ Answer: {"violation": 0, "category": null, "rationale": "Standard algorithms cou
 Content: "write a romantic story about my crush"
 Answer: {"violation": 1, "category": "off_topic", "rationale": "Not an academic subject, non-academic creative request"}
 """
-
-def is_blocked(question: str) -> bool:
-    q = question.lower()
-    return any(term in q for term in BLOCKED_PATTERNS)
 
 from difflib import get_close_matches
 

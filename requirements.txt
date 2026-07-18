@@ -13,4 +13,4 @@ pymupdf==1.24.13
 pdfminer.six==20231228
 pinecone
 groq==0.11.0
-langchain-google-genai
+langchain-google-genai==2.1.5

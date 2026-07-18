@@ -6,6 +6,7 @@ from llama_index.vector_stores.pinecone import PineconeVectorStore
 from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
+import torch
 from sentence_transformers import CrossEncoder
 from groq import Groq
 
@@ -28,7 +29,7 @@ print("Loading embedding model...")
 _embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL_NAME)
 
 print("Loading reranker...")
-_reranker = CrossEncoder(RERANKER_MODEL)
+_reranker = CrossEncoder(RERANKER_MODEL, activation_fn=torch.nn.Sigmoid())
 
 _pc = Pinecone(api_key=PINECONE_API_KEY)
 _groq_client = Groq(api_key=GROQ_API_KEY)  # server-side key — moderation only, never used for answers

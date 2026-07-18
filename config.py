@@ -13,6 +13,7 @@ MANIFEST_PATH = "data/ingested_files.json"
 
 EMBED_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL_NAME = "openai/gpt-oss-120b"
 SAFEGUARD_MODEL_NAME = "openai/gpt-oss-safeguard-20b"
 
@@ -25,6 +26,3 @@ RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 RERANKER_THRESHOLD = 0.5
 
 MAX_NEW_TOKEN = 2048
-MIN_NEW_TOKEN = 1
-TOP_P = 1
-TOP_K = 3
