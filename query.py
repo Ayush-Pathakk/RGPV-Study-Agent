@@ -29,7 +29,7 @@ print("Loading embedding model...")
 _embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL_NAME)
 
 print("Loading reranker...")
-_reranker = CrossEncoder(RERANKER_MODEL, activation_fn=torch.nn.Sigmoid())
+_reranker = CrossEncoder(RERANKER_MODEL, default_activation_function=torch.nn.Sigmoid())
 
 _pc = Pinecone(api_key=PINECONE_API_KEY)
 _groq_client = Groq(api_key=GROQ_API_KEY)  # server-side key — moderation only, never used for answers
@@ -115,27 +115,30 @@ def check_moderation(question: str, memory: str = "") -> dict:
         return {"violation": False, "category": None, "rationale": "moderation_error"}
 
 
-def ask(index, question: str, api_key: str, provider: str, memory: str = "") -> tuple[str, str | None]:
+def ask(index, question: str, api_key: str, provider: str, memory: str = "", topic: str = "") -> tuple[str, str | None, str]:
     mod = check_moderation(question, memory)
     if mod["violation"]:
         print(f"Blocked [{mod['category']}]: {mod['rationale']}")
-        return "This assistant is scoped to RGPV academic subjects only. I can't help with that request.", None
+        return "This assistant is scoped to RGPV academic subjects only. I can't help with that request.", None, topic
 
     q = question.lower()
     if any(w in q for w in META_KEYWORDS):
         if memory:
-            return f"Your last question was: **{memory.split(chr(10))[0].replace('Previous Q: ', '')}**", None
-        return "I don't have your previous question in memory.", None
+            return f"Your last question was: **{memory.split(chr(10))[0].replace('Previous Q: ', '')}**", None, topic
+        return "I don't have your previous question in memory.", None, topic
 
     intent = detect_intent(question)
     context = retrieve_and_rerank(index, question)
     resolved_question = question
-    if context is None and memory:
-        topic = memory.split("\n")[0].replace("Previous Q: ", "")
+    if context is not None:
+        # Fresh direct hit — this question stands on its own, reset the topic anchor.
+        topic = question
+    elif topic:
         retry_context = retrieve_and_rerank(index, f"{topic} {question}")
         if retry_context is not None:
             context = retry_context
             resolved_question = f"{topic} — {question}"
+            # topic stays as-is: do NOT fold resolved_question back in, or it snowballs across turns.
 
     memory_block = f"\n\n[Previous Exchange]\n{memory}\n" if memory else ""
     prompt_map = {"short": SHORT_PROMPT, "4mark": FOUR_MARK_PROMPT, "7mark": SEVEN_MARK_PROMPT}
@@ -155,11 +158,11 @@ def ask(index, question: str, api_key: str, provider: str, memory: str = "") -> 
             HumanMessage(content=f"{memory_block}Question: {resolved_question}"),
         ]
         response = llm.invoke(messages)
-        return response.content, resolved_question
+        return response.content, resolved_question, topic
 
     messages = [
         SystemMessage(content=prompt_map[intent]),
         HumanMessage(content=f"{memory_block}<context>\n{context}\n</context>\n\nQuestion: {resolved_question}"),
     ]
     response = llm.invoke(messages)
-    return response.content, resolved_question
+    return response.content, resolved_question, topic

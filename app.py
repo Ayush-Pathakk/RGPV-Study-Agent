@@ -42,8 +42,10 @@ def ask_question():
         return jsonify({"error": "no_api_key", "answer": "Please add your Groq or Gemini API key first."}), 401
 
     memory = session.get("memory", "")
+    topic = session.get("topic", "")
     try:
-        answer, resolved_question = ask(index, question, api_key, provider, memory)
+        answer, resolved_question, topic = ask(index, question, api_key, provider, memory, topic)
+        session["topic"] = topic
     except Exception as e:
         err = str(e).lower()
         if "authentication" in err or "invalid api key" in err or "401" in err or "permission" in err:
@@ -58,4 +60,4 @@ def ask_question():
     return jsonify({"answer": answer})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=7860, debug=False, use_reloader=False)
+    app.run(host="0.0.0.0", port=7860, debug=True, use_reloader=True)
