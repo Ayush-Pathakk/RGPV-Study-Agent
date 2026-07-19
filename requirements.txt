@@ -11,7 +11,6 @@ llama-index-vector-stores-pinecone==0.2.1
 pinecone-client==5.0.1
 pymupdf==1.24.13
 pdfminer.six==20231228
-pinecone
 groq==0.11.0
 langchain-google-genai==2.1.5
 rank_bm25==0.2.2

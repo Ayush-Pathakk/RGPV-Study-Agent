@@ -82,7 +82,7 @@ def get_llm(provider: str, api_key: str):
 
 def retrieve_and_rerank(index, question: str):
     # Dense side (unchanged from before hybrid search)
-    retriever = index.as_retriever(similarity_top_k=RETRIEVAL_TOP_K)
+    retriever = index.as_retriever(similarity_top_k = HYBRID_CANDIDATE_POOL)
     dense_nodes = retriever.retrieve(question)
     dense_candidates = {
         n.node_id: {"text": n.get_content(), "filename": n.metadata.get("filename", "?"), "page_no": n.metadata.get("page_no", "?")}
@@ -100,7 +100,16 @@ def retrieve_and_rerank(index, question: str):
     fused_ids = reciprocal_rank_fusion(
         [list(dense_candidates.keys()), list(bm25_candidates.keys())], k=RRF_K
     )
-    all_candidates = {**bm25_candidates, **dense_candidates}  # dense wins on id collision (fresher metadata)
+    all_candidates = bm25_candidates.copy()
+
+    for doc_id, dense_meta in dense_candidates.items():
+        if doc_id in all_candidates:
+            # Merge metadata while preferring dense values when present
+            merged = all_candidates[doc_id]
+            merged.update({k: v for k, v in dense_meta.items() if v not in ("", None, "?")})
+            all_candidates[doc_id] = merged
+        else:
+            all_candidates[doc_id] = dense_meta
     pool = [(cid, all_candidates[cid]) for cid in fused_ids[:RETRIEVAL_TOP_K]]
 
     if not pool:
