@@ -22,7 +22,11 @@ from config import (
     GROQ_API_KEY,
     MAX_NEW_TOKEN,
     SAFEGUARD_MODEL_NAME,
+    CORPUS_PATH,
+    HYBRID_CANDIDATE_POOL,
+    RRF_K,
 )
+from hybrid_retrieval import BM25Index, reciprocal_rank_fusion
 from prompts import SHORT_PROMPT, FOUR_MARK_PROMPT, SEVEN_MARK_PROMPT, detect_intent, META_KEYWORDS, MODERATION_POLICY
 
 print("Loading embedding model...")
@@ -30,6 +34,11 @@ _embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL_NAME)
 
 print("Loading reranker...")
 _reranker = CrossEncoder(RERANKER_MODEL, default_activation_function=torch.nn.Sigmoid())
+
+print("Loading BM25 corpus...")
+_bm25 = BM25Index(CORPUS_PATH)
+if not _bm25.available:
+    print("BM25 corpus empty/missing — hybrid search disabled, falling back to dense-only.")
 
 _pc = Pinecone(api_key=PINECONE_API_KEY)
 _groq_client = Groq(api_key=GROQ_API_KEY)  # server-side key — moderation only, never used for answers
@@ -72,18 +81,43 @@ def get_llm(provider: str, api_key: str):
 
 
 def retrieve_and_rerank(index, question: str):
+    # Dense side (unchanged from before hybrid search)
     retriever = index.as_retriever(similarity_top_k=RETRIEVAL_TOP_K)
-    nodes = retriever.retrieve(question)
-    pairs = [(question, node.get_content()) for node in nodes]
+    dense_nodes = retriever.retrieve(question)
+    dense_candidates = {
+        n.node_id: {"text": n.get_content(), "filename": n.metadata.get("filename", "?"), "page_no": n.metadata.get("page_no", "?")}
+        for n in dense_nodes
+    }
+
+    # Sparse side — no-op if BM25 corpus isn't loaded (dense-only fallback)
+    bm25_hits = _bm25.search(question, HYBRID_CANDIDATE_POOL)
+    bm25_candidates = {
+        r["id"]: {"text": r["text"], "filename": r["filename"], "page_no": r["page_no"]}
+        for r in bm25_hits
+    }
+
+    # RRF fusion by rank position only — no score-scale mixing
+    fused_ids = reciprocal_rank_fusion(
+        [list(dense_candidates.keys()), list(bm25_candidates.keys())], k=RRF_K
+    )
+    all_candidates = {**bm25_candidates, **dense_candidates}  # dense wins on id collision (fresher metadata)
+    pool = [(cid, all_candidates[cid]) for cid in fused_ids[:RETRIEVAL_TOP_K]]
+
+    if not pool:
+        return None, []
+
+    pairs = [(question, meta["text"]) for _, meta in pool]
     scores = _reranker.predict(pairs)
-    ranked = sorted(zip(scores, nodes), key=lambda x: x[0], reverse=True)
-    top = [node for score, node in ranked[:RERANKER_TOP_N] if score > RERANKER_THRESHOLD]
+    ranked = sorted(zip(scores, pool), key=lambda x: x[0], reverse=True)
+    top = [meta for score, (cid, meta) in ranked[:RERANKER_TOP_N] if score > RERANKER_THRESHOLD]
     if not top:
-        return None
-    return "\n\n---\n\n".join([
-        f"[Source: {n.metadata.get('filename','?')} | Page: {n.metadata.get('page_no','?')}]\n{n.get_content()}"
-        for n in top
+        return None, []
+    context = "\n\n---\n\n".join([
+        f"[Source: {m['filename']} | Page: {m['page_no']}]\n{m['text']}"
+        for m in top
     ])
+    sources = [{"filename": m["filename"], "page": m["page_no"]} for m in top]
+    return context, sources
 
 
 def summarize_exchange(question: str, answer: str) -> str:
@@ -115,28 +149,29 @@ def check_moderation(question: str, memory: str = "") -> dict:
         return {"violation": False, "category": None, "rationale": "moderation_error"}
 
 
-def ask(index, question: str, api_key: str, provider: str, memory: str = "", topic: str = "") -> tuple[str, str | None, str]:
+def ask(index, question: str, api_key: str, provider: str, memory: str = "", topic: str = "") -> tuple[str, str | None, str, list]:
     mod = check_moderation(question, memory)
     if mod["violation"]:
         print(f"Blocked [{mod['category']}]: {mod['rationale']}")
-        return "This assistant is scoped to RGPV academic subjects only. I can't help with that request.", None, topic
+        return "This assistant is scoped to RGPV academic subjects only. I can't help with that request.", None, topic, []
 
     q = question.lower()
     if any(w in q for w in META_KEYWORDS):
         if memory:
-            return f"Your last question was: **{memory.split(chr(10))[0].replace('Previous Q: ', '')}**", None, topic
-        return "I don't have your previous question in memory.", None, topic
+            return f"Your last question was: **{memory.split(chr(10))[0].replace('Previous Q: ', '')}**", None, topic, []
+        return "I don't have your previous question in memory.", None, topic, []
 
     intent = detect_intent(question)
-    context = retrieve_and_rerank(index, question)
+    context, sources = retrieve_and_rerank(index, question)
     resolved_question = question
     if context is not None:
         # Fresh direct hit — this question stands on its own, reset the topic anchor.
         topic = question
     elif topic:
-        retry_context = retrieve_and_rerank(index, f"{topic} {question}")
+        retry_context, retry_sources = retrieve_and_rerank(index, f"{topic} {question}")
         if retry_context is not None:
             context = retry_context
+            sources = retry_sources
             resolved_question = f"{topic} — {question}"
             # topic stays as-is: do NOT fold resolved_question back in, or it snowballs across turns.
 
@@ -158,11 +193,11 @@ def ask(index, question: str, api_key: str, provider: str, memory: str = "", top
             HumanMessage(content=f"{memory_block}Question: {resolved_question}"),
         ]
         response = llm.invoke(messages)
-        return response.content, resolved_question, topic
+        return response.content, resolved_question, topic, []
 
     messages = [
         SystemMessage(content=prompt_map[intent]),
         HumanMessage(content=f"{memory_block}<context>\n{context}\n</context>\n\nQuestion: {resolved_question}"),
     ]
     response = llm.invoke(messages)
-    return response.content, resolved_question, topic
+    return response.content, resolved_question, topic, sources

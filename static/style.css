@@ -432,6 +432,13 @@ body {
 .copy-btn:hover {
     background: rgba(74, 124, 78, 0.2);
 }
+.sources {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(74, 124, 78, 0.15);
+    font-size: 11px;
+    color: rgba(26, 46, 26, 0.45);
+}
 .key-modal-overlay {
     position: fixed;
     inset: 0;

@@ -44,7 +44,7 @@ def ask_question():
     memory = session.get("memory", "")
     topic = session.get("topic", "")
     try:
-        answer, resolved_question, topic = ask(index, question, api_key, provider, memory, topic)
+        answer, resolved_question, topic, sources = ask(index, question, api_key, provider, memory, topic)
         session["topic"] = topic
     except Exception as e:
         err = str(e).lower()
@@ -57,7 +57,7 @@ def ask_question():
     if resolved_question is not None:
         session["memory"] = summarize_exchange(resolved_question, answer)
 
-    return jsonify({"answer": answer})
+    return jsonify({"answer": answer, "sources": sources})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=7860, debug=True, use_reloader=True)
+    app.run(host="0.0.0.0", port=7860, debug=False, use_reloader=False)

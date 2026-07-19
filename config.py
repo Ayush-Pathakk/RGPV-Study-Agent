@@ -26,3 +26,8 @@ RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 RERANKER_THRESHOLD = 0.5
 
 MAX_NEW_TOKEN = 2048
+
+# Hybrid search
+CORPUS_PATH = "data/bm25_corpus.jsonl"
+HYBRID_CANDIDATE_POOL = 20 
+RRF_K = 60

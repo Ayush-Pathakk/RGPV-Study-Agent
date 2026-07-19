@@ -17,7 +17,9 @@ from config import (
     EMBED_MODEL_NAME,
     CHUNK_OVERLAP,
     CHUNK_SIZE,
+    CORPUS_PATH,
 )
+from hybrid_retrieval import append_corpus_records
 
 
 def load_manifest() -> set:
@@ -83,14 +85,30 @@ def build_index(documents, vector_store):
 
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-    print("Chunking, embedding, upserting to Pinecone...")
-    for i, doc in enumerate(documents[:3]):
-        print(type(doc.text), repr(doc.text[:200]))
-    index = VectorStoreIndex.from_documents(
-        documents,
+    print("Chunking...")
+    nodes = splitter.get_nodes_from_documents(documents, show_progress=True)
+
+    # Persist chunk text/metadata for BM25 before upserting — node_id here
+    # matches the id Pinecone will store, so dense and sparse results can
+    # be fused by id later without any fuzzy text matching.
+    corpus_records = [
+        {
+            "id": n.node_id,
+            "text": n.get_content(),
+            "filename": n.metadata.get("filename", "?"),
+            "subject": n.metadata.get("subject", "?"),
+            "page_no": n.metadata.get("page_no", "?"),
+        }
+        for n in nodes
+    ]
+    append_corpus_records(corpus_records, CORPUS_PATH)
+    print(f"Appended {len(corpus_records)} chunk records to BM25 corpus.")
+
+    print("Embedding, upserting to Pinecone...")
+    index = VectorStoreIndex(
+        nodes,
         storage_context=storage_context,
         embed_model=embed_model,
-        transformations=[splitter],
         show_progress=True,
     )
 
