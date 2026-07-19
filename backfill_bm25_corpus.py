@@ -29,10 +29,8 @@ def backfill():
     print(f"Pinecone reports {total} vectors. Backfilling BM25 corpus...")
 
     all_ids = []
-
-    for page in index.list():
-        all_ids.extend(item.id for item in page.vectors)
-
+    for ids_batch in index.list():
+        all_ids.extend(ids_batch)
     print(f"Collected {len(all_ids)} vector ids.")
 
     written = 0
