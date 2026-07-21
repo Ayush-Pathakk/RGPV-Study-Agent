@@ -123,7 +123,7 @@ def ask_question():
     if resolved_question is not None:
         session["memory"] = summarize_exchange(
             resolved_question,
-            answer,
+            answer,     
         )
 
     return jsonify(
