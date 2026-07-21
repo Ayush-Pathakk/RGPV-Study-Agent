@@ -12,7 +12,7 @@ never talks to Pinecone directly.
 import json
 import os
 import re
-from rank_bm25 import BM25Okapi
+from rank_bm25 import BM25Plus
 
 
 def _tokenize(text: str) -> list[str]:
@@ -56,7 +56,7 @@ class BM25Index:
         self.available = len(self.records) > 0
         if self.available:
             tokenized = [_tokenize(r["text"]) for r in self.records]
-            self._bm25 = BM25Okapi(tokenized)
+            self._bm25 = BM25Plus(tokenized)
         else:
             self._bm25 = None
 
@@ -65,7 +65,12 @@ class BM25Index:
             return []
         scores = self._bm25.get_scores(_tokenize(query))
         ranked_idx = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
-        return [self.records[i] for i in ranked_idx[:top_k] if scores[i] > 0]
+        # No absolute score threshold here: BM25Plus adds a delta baseline to
+        # every document (even zero-overlap ones), so "score > 0" would let
+        # almost everything through. Rank ORDER is still meaningful — this
+        # just widens the candidate pool for RRF; the cross-encoder reranker
+        # downstream is the actual relevance gate.
+        return [self.records[i] for i in ranked_idx[:top_k]]
 
 
 def reciprocal_rank_fusion(ranked_lists: list[list[str]], k: int = 60) -> list[str]:

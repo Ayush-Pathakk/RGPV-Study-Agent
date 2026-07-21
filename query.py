@@ -76,13 +76,13 @@ def validate_key(key: str, provider: str) -> tuple[bool, str]:
 
 def get_llm(provider: str, api_key: str):
     if provider == "groq":
-        return ChatGroq(api_key=api_key, model_name=GROQ_MODEL_NAME, max_tokens=MAX_NEW_TOKEN)
-    return ChatGoogleGenerativeAI(model="gemini-2.5-flash", api_key=api_key, max_output_tokens=MAX_NEW_TOKEN)
+        return ChatGroq(api_key=api_key, model_name=GROQ_MODEL_NAME, max_tokens=MAX_NEW_TOKEN, temperature=0)
+    return ChatGoogleGenerativeAI(model="gemini-2.5-flash", api_key=api_key, max_output_tokens=MAX_NEW_TOKEN, temperature=0)
 
 
 def retrieve_and_rerank(index, question: str):
     # Dense side (unchanged from before hybrid search)
-    retriever = index.as_retriever(similarity_top_k = HYBRID_CANDIDATE_POOL)
+    retriever = index.as_retriever(similarity_top_k=RETRIEVAL_TOP_K)
     dense_nodes = retriever.retrieve(question)
     dense_candidates = {
         n.node_id: {"text": n.get_content(), "filename": n.metadata.get("filename", "?"), "page_no": n.metadata.get("page_no", "?")}
@@ -100,16 +100,7 @@ def retrieve_and_rerank(index, question: str):
     fused_ids = reciprocal_rank_fusion(
         [list(dense_candidates.keys()), list(bm25_candidates.keys())], k=RRF_K
     )
-    all_candidates = bm25_candidates.copy()
-
-    for doc_id, dense_meta in dense_candidates.items():
-        if doc_id in all_candidates:
-            # Merge metadata while preferring dense values when present
-            merged = all_candidates[doc_id]
-            merged.update({k: v for k, v in dense_meta.items() if v not in ("", None, "?")})
-            all_candidates[doc_id] = merged
-        else:
-            all_candidates[doc_id] = dense_meta
+    all_candidates = {**bm25_candidates, **dense_candidates}  # dense wins on id collision (fresher metadata)
     pool = [(cid, all_candidates[cid]) for cid in fused_ids[:RETRIEVAL_TOP_K]]
 
     if not pool:
